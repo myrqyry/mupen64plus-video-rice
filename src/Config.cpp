@@ -121,6 +121,7 @@ SettingInfo TextureEnhancementSettings[] =
 {"hq4x", TEXTURE_HQ4X_ENHANCEMENT},
 {"Sharpen", TEXTURE_SHARPEN_ENHANCEMENT},
 {"Sharpen More", TEXTURE_SHARPEN_MORE_ENHANCEMENT},
+{"AI Upscaling", TEXTURE_AI_ENHANCEMENT},
 };
 
 SettingInfo TextureEnhancementControlSettings[] =
@@ -350,6 +351,8 @@ BOOL InitConfiguration(void)
     ConfigSetDefaultBool(l_ConfigVideoRice, "ForcePolygonOffset", FALSE, "If true, use polygon offset values specified below");
     ConfigSetDefaultFloat(l_ConfigVideoRice, "PolygonOffsetFactor", 0.0f, "Specifies a scale factor that is used to create a variable depth offset for each polygon");
     ConfigSetDefaultFloat(l_ConfigVideoRice, "PolygonOffsetUnits", 0.0f, "Is multiplied by an implementation-specific value to create a constant depth offset");
+    
+    ConfigSetDefaultString(l_ConfigVideoRice, "AIModelPath", "", "Path to AI Upscaling Model (.tflite)");
     return TRUE;
 }
 
@@ -467,6 +470,12 @@ static void ReadConfiguration(void)
     options.bForcePolygonOffset = ConfigGetParamBool(l_ConfigVideoRice, "ForcePolygonOffset");
     options.polygonOffsetFactor = ConfigGetParamFloat(l_ConfigVideoRice, "PolygonOffsetFactor");
     options.polygonOffsetUnits = ConfigGetParamFloat(l_ConfigVideoRice, "PolygonOffsetUnits");
+
+    const char * path = ConfigGetParamString(l_ConfigVideoRice, "AIModelPath");
+    if (path) {
+        strncpy(options.aiModelPath, path, sizeof(options.aiModelPath) - 1);
+        options.aiModelPath[sizeof(options.aiModelPath) - 1] = '\0';
+    }
 
     CDeviceBuilder::SelectDeviceType((SupportedDeviceType)options.OpenglRenderSetting);
 

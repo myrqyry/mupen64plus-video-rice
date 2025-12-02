@@ -670,6 +670,8 @@ EXPORT m64p_error CALL PluginStartup(m64p_dynlib_handle CoreLibHandle, void *Con
     if (!InitConfiguration())
         return M64ERR_INTERNAL;
 
+    InitializeAIUpscaler();
+
     l_PluginInit = 1;
     return M64ERR_SUCCESS;
 }
@@ -692,6 +694,8 @@ EXPORT m64p_error CALL PluginShutdown(void)
     /* reset some local variables */
     l_DebugCallback = NULL;
     l_DebugCallContext = NULL;
+
+    ShutdownAIUpscaler();
 
     l_PluginInit = 0;
     return M64ERR_SUCCESS;

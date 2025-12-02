@@ -18,18 +18,47 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include <cmath>
-#include <exception>
 
-#include "CombinerDefs.h"
+#include <vector>
+#include <cstdint>
+#include <cstdlib>
+
+
 #include "Config.h"
 #include "ConvertImage.h"
 #include "Debugger.h"
+#include "lumina_integration.h"
+#include "pixel_utils.h"
+#include <map>
 #include "DeviceBuilder.h"
 #include "FrameBuffer.h"
 #include "RSP_Parser.h"
 #include "RenderBase.h"
 #include "RenderTexture.h"
 #include "TextureManager.h"
+// Global upscaler instance
+// static std::unique_ptr<AIUpscaler> g_upscaler;
+
+// Pending async upscales map
+static std::map<void*, int> g_pending_upscales;
+
+void InitializeAIUpscaler() {
+    const char* lib_path = std::getenv("LUMINA_LIBRARY_PATH");
+    if (!lib_path) {
+        lib_path = "/home/myrqyry/lumina-plugins/liblumina64_plugin.so";
+    }
+
+    if (lumina_init_plugin(lib_path)) {
+        printf("✓ AI Texture Upscaling: ENABLED (LUMINA64)\n");
+    } else {
+        printf("✗ AI Texture Upscaling: FAILED (Could not load %s)\n", lib_path);
+    }
+}
+
+void ShutdownAIUpscaler() {
+    lumina_shutdown_plugin();
+    printf("✓ AI Texture Upscaling: SHUTDOWN\n");
+}
 
 CTextureManager gTextureManager;
 
@@ -118,6 +147,7 @@ CTextureManager::~CTextureManager()
 bool CTextureManager::CleanUp()
 {
     RecycleAllTextures();
+    g_pending_upscales.clear(); // Clear pending upscales
 
     if (!g_bUseSetTextureMem)
     {
@@ -264,6 +294,7 @@ void CTextureManager::RecycleTexture(TxtrCacheEntry *pEntry)
     {
         // Fix me, why I can not reuse the texture in OpenGL,
         // how can I unload texture from video card memory for OpenGL
+        g_pending_upscales.erase(pEntry); // Cancel pending upscale
         delete pEntry;
         return;
     }
@@ -271,6 +302,7 @@ void CTextureManager::RecycleTexture(TxtrCacheEntry *pEntry)
     if (pEntry->pTexture == NULL)
     {
         // No point in saving!
+        g_pending_upscales.erase(pEntry); // Cancel pending upscale
         delete pEntry;
     }
     else
@@ -748,6 +780,99 @@ TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, boo
                         ConvertTexture_16(pEntry, fromTMEM);
                     SAFE_DELETE(pEntry->pEnhancedTexture);
                     pEntry->dwEnhancementFlag = TEXTURE_NO_ENHANCEMENT;
+
+                    // AI Upscaling Hook
+                    // Only upscale small textures
+                    if (pEntry->pTexture && pEntry->ti.WidthToLoad <= 64 && pEntry->ti.HeightToLoad <= 64) {
+                        
+                        DrawInfo dInfo;
+                        if (pEntry->pTexture->StartUpdate(&dInfo)) {
+                            // Async Upscaling Logic
+                            // static std::map<void*, int> g_pending_upscales; // Moved to global
+                            
+                            auto it = g_pending_upscales.find(pEntry);
+                            if (it != g_pending_upscales.end()) {
+                                // Check status
+                                int status = lumina_async_status(it->second);
+                                if (status == 1) { // Ready
+                                    unsigned char* enhanced_data = nullptr;
+                                    int newW = 0, newH = 0;
+                                    if (lumina_async_result(it->second, &enhanced_data, &newW, &newH)) {
+                                        // printf("LUMINA: Result ready for %d: %dx%d\n", it->second, newW, newH);
+                                        // Create enhanced texture
+                                        pEntry->pEnhancedTexture = CDeviceBuilder::GetBuilder()->CreateTexture(newW, newH);
+                                        if (pEntry->pEnhancedTexture) {
+                                            DrawInfo newDI;
+                                            if (pEntry->pEnhancedTexture->StartUpdate(&newDI)) {
+                                                // Convert RGB back to RGBA (Rice uses RGBA internally for OpenGL)
+                                                std::vector<uint8_t> rgba_output;
+                                                lumina::RGBToRGBA(enhanced_data, newW, newH, rgba_output);
+                                                
+                                                // Copy row by row to handle pitch correctly
+                                                uint8_t* dst = (uint8_t*)newDI.lpSurface;
+                                                const uint8_t* src = rgba_output.data();
+                                                int rowSize = newW * 4;
+                                                
+                                                // printf("LUMINA: Copying to texture. Pitch: %d, RowSize: %d, H: %d\n", newDI.lPitch, rowSize, newH);
+                                                
+                                                if (newDI.lPitch < rowSize) {
+                                                    printf("LUMINA ERROR: Pitch %d < RowSize %d\n", newDI.lPitch, rowSize);
+                                                } else {
+                                                    for (int y = 0; y < newH; y++) {
+                                                        memcpy(dst + y * newDI.lPitch, src + y * rowSize, rowSize);
+                                                    }
+                                                }
+                                                
+                                                pEntry->pEnhancedTexture->EndUpdate(&newDI);
+                                                pEntry->dwEnhancementFlag = TEXTURE_AI_ENHANCEMENT;
+                                            }
+                                        }
+                                        free(enhanced_data);
+                                    }
+                                    g_pending_upscales.erase(it);
+                                } else if (status == -1) { // Error
+                                    g_pending_upscales.erase(it);
+                                }
+                                // If 0 (Pending), do nothing, keep using original
+                            } else {
+                                // Not pending, check if we should upscale
+                                // (Only if not already enhanced, which is checked by caller?)
+                                // Caller checks: if (pEntry->pTexture && ... )
+                                // But we need to ensure we don't submit if already enhanced?
+                                // pEntry->dwEnhancementFlag is set AFTER enhancement.
+                                // But here we are inside the hook.
+                                
+                                // Submit new request
+                                int width = pEntry->ti.WidthToLoad;
+                                int height = pEntry->ti.HeightToLoad;
+                                
+                                // Handle pitch correctly for input
+                                std::vector<uint8_t> rgb_input;
+                                rgb_input.resize(width * height * 3);
+                                const uint8_t* src_surface = (const uint8_t*)dInfo.lpSurface;
+                                uint8_t* dst_rgb = rgb_input.data();
+                                
+                                for (int y = 0; y < height; y++) {
+                                    const uint8_t* row_src = src_surface + y * dInfo.lPitch;
+                                    for (int x = 0; x < width; x++) {
+                                        dst_rgb[0] = row_src[0];
+                                        dst_rgb[1] = row_src[1];
+                                        dst_rgb[2] = row_src[2];
+                                        row_src += 4; // Assume RGBA/BGRA (4 bytes)
+                                        dst_rgb += 3;
+                                    }
+                                }
+                                
+                                int id = lumina_upscale_async(rgb_input.data(), width, height);
+                                if (id > 0) {
+                                    g_pending_upscales[pEntry] = id;
+                                    // printf("LUMINA: Submitted async %d (%dx%d)\n", id, width, height);
+                                }
+                            }
+                            
+                            pEntry->pTexture->EndUpdate(&dInfo);
+                        }
+                    }
                 }
             }
 

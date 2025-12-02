@@ -240,6 +240,12 @@ public:
 
 extern CTextureManager gTextureManager;     // The global instance of CTextureManager class
 extern void DumpCachedTexture(TxtrCacheEntry &entry);
+void InitializeAIUpscaler();
+void ShutdownAIUpscaler();
+
+extern "C" {
+#include "../../lumina_plugin/lumina_bridge.h"
+}
 
 #endif
 

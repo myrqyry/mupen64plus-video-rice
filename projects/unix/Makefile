@@ -140,11 +140,12 @@ endif
 
 SRCDIR = ../../src
 OBJDIR = _obj$(POSTFIX)
+LITERT_DIR = /home/myrqyry/🙏️/LUMINA64/litert/install
 
 # base CFLAGS, LDLIBS, and LDFLAGS
 OPTFLAGS ?= -O3 -flto
 WARNFLAGS ?= -Wall
-CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I$(SRCDIR)
+CFLAGS += $(OPTFLAGS) $(WARNFLAGS) -ffast-math -fno-strict-aliasing -fvisibility=hidden -I$(SRCDIR) -I../../../lumina_plugin -I$(LITERT_DIR)/include
 CXXFLAGS += -fvisibility-inlines-hidden
 LDFLAGS += $(SHARED)
 
@@ -187,7 +188,8 @@ endif
 
 # set special flags per-system
 ifeq ($(OS), LINUX)
-  LDLIBS += -ldl
+  LDLIBS += -ldl -Wl,--start-group $(wildcard $(LITERT_DIR)/lib/*.a) -Wl,--end-group -pthread
+  # only export api symbols
   # only export api symbols
   LDFLAGS += -Wl,-version-script,$(SRCDIR)/video_api_export.ver
 endif
@@ -370,7 +372,12 @@ SOURCE = \
 	$(SRCDIR)/TextureFilters_hq4x.cpp \
 	$(SRCDIR)/TextureManager.cpp \
 	$(SRCDIR)/VectorMath.cpp \
-	$(SRCDIR)/Video.cpp
+	$(SRCDIR)/Video.cpp \
+	$(SRCDIR)/Video.cpp \
+	$(SRCDIR)/lumina_integration.c
+
+# Add Lumina plugin include path for pixel_utils.h
+CFLAGS += -I../../lumina_plugin
 
 ifeq ($(OS),MINGW)
 SOURCE += \

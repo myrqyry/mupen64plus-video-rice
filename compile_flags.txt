@@ -1,0 +1,5 @@
+-I/home/myrqyry/🙏️/LUMINA64/emulator/mupen64plus-core/src/api
+-I/home/myrqyry/🙏️/LUMINA64/emulator/mupen64plus-core/src/main
+-I/usr/include/SDL2
+-D_REENTRANT
+-I../lumina_plugin
