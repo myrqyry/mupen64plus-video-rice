@@ -95,6 +95,7 @@ enum {
     TEXTURE_SHARPEN_MORE_ENHANCEMENT,
     TEXTURE_EXTERNAL,
     TEXTURE_MIRRORED,
+    TEXTURE_AI_ENHANCEMENT,
 };
 
 enum {
@@ -216,6 +217,7 @@ typedef struct {
     float   polygonOffsetUnits;
 
     HACK_FOR_GAMES  enableHackForGames;
+    char    aiModelPath[256];
 } GlobalOptions;
 
 typedef struct {
