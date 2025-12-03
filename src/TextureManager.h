@@ -244,7 +244,7 @@ void InitializeAIUpscaler();
 void ShutdownAIUpscaler();
 
 extern "C" {
-#include "../../lumina_plugin/lumina_bridge.h"
+#include "lumina_integration.h"
 }
 
 #endif

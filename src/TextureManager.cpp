@@ -782,8 +782,19 @@ TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, boo
                     pEntry->dwEnhancementFlag = TEXTURE_NO_ENHANCEMENT;
 
                     // AI Upscaling Hook
-                    // Only upscale small textures
-                    if (pEntry->pTexture && pEntry->ti.WidthToLoad <= 64 && pEntry->ti.HeightToLoad <= 64) {
+                    // Only upscale textures with SPANF-supported dimensions
+                    int w = pEntry->ti.WidthToLoad;
+                    int h = pEntry->ti.HeightToLoad;
+                    bool supportedSize = (w == 32 && h == 32) ||  // 32x32
+                                        (w == 64 && h == 32) ||   // 64x32
+                                        (w == 64 && h == 64);     // 64x64
+                    
+                    // Check if we should upscale this texture
+                        if (lumina_get_enabled()) {
+                             // printf("LUMINA: Checking texture: W=%d, H=%d, Fmt=%d\n", pEntry->ti.WidthToLoad, pEntry->ti.HeightToLoad, pEntry->ti.Format); fflush(stdout);
+                        }
+
+                    if (pEntry->pTexture && supportedSize) {
                         
                         DrawInfo dInfo;
                         if (pEntry->pTexture->StartUpdate(&dInfo)) {
@@ -792,40 +803,48 @@ TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, boo
                             
                             auto it = g_pending_upscales.find(pEntry);
                             if (it != g_pending_upscales.end()) {
-                                // Check status
+                                    // Check status
                                 int status = lumina_async_status(it->second);
                                 if (status == 1) { // Ready
+                                    printf("LUMINA: Request %d ready. Getting result...\n", it->second); fflush(stdout);
                                     unsigned char* enhanced_data = nullptr;
                                     int newW = 0, newH = 0;
                                     if (lumina_async_result(it->second, &enhanced_data, &newW, &newH)) {
-                                        // printf("LUMINA: Result ready for %d: %dx%d\n", it->second, newW, newH);
+                                        printf("LUMINA: Result ready for %d: %dx%d. Creating texture...\n", it->second, newW, newH); fflush(stdout);
                                         // Create enhanced texture
                                         pEntry->pEnhancedTexture = CDeviceBuilder::GetBuilder()->CreateTexture(newW, newH);
                                         if (pEntry->pEnhancedTexture) {
+                                            printf("LUMINA: Texture created. Starting update...\n"); fflush(stdout);
                                             DrawInfo newDI;
                                             if (pEntry->pEnhancedTexture->StartUpdate(&newDI)) {
+                                                printf("LUMINA: Update started. Converting RGB to RGBA...\n"); fflush(stdout);
                                                 // Convert RGB back to RGBA (Rice uses RGBA internally for OpenGL)
                                                 std::vector<uint8_t> rgba_output;
                                                 lumina::RGBToRGBA(enhanced_data, newW, newH, rgba_output);
                                                 
+                                                printf("LUMINA: Conversion done. Copying to surface...\n"); fflush(stdout);
                                                 // Copy row by row to handle pitch correctly
                                                 uint8_t* dst = (uint8_t*)newDI.lpSurface;
                                                 const uint8_t* src = rgba_output.data();
                                                 int rowSize = newW * 4;
                                                 
-                                                // printf("LUMINA: Copying to texture. Pitch: %d, RowSize: %d, H: %d\n", newDI.lPitch, rowSize, newH);
-                                                
                                                 if (newDI.lPitch < rowSize) {
-                                                    printf("LUMINA ERROR: Pitch %d < RowSize %d\n", newDI.lPitch, rowSize);
+                                                    printf("LUMINA ERROR: Pitch %d < RowSize %d\n", newDI.lPitch, rowSize); fflush(stdout);
                                                 } else {
                                                     for (int y = 0; y < newH; y++) {
                                                         memcpy(dst + y * newDI.lPitch, src + y * rowSize, rowSize);
                                                     }
                                                 }
                                                 
+                                                printf("LUMINA: Copy done. Ending update...\n"); fflush(stdout);
                                                 pEntry->pEnhancedTexture->EndUpdate(&newDI);
                                                 pEntry->dwEnhancementFlag = TEXTURE_AI_ENHANCEMENT;
+                                                printf("LUMINA: Update ended.\n"); fflush(stdout);
+                                            } else {
+                                                printf("LUMINA ERROR: StartUpdate failed\n"); fflush(stdout);
                                             }
+                                        } else {
+                                            printf("LUMINA ERROR: CreateTexture failed\n"); fflush(stdout);
                                         }
                                         free(enhanced_data);
                                     }
@@ -852,6 +871,8 @@ TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, boo
                                 const uint8_t* src_surface = (const uint8_t*)dInfo.lpSurface;
                                 uint8_t* dst_rgb = rgb_input.data();
                                 
+                                printf("LUMINA: Preparing input copy. W: %d, H: %d, Pitch: %d\n", width, height, dInfo.lPitch); fflush(stdout);
+
                                 for (int y = 0; y < height; y++) {
                                     const uint8_t* row_src = src_surface + y * dInfo.lPitch;
                                     for (int x = 0; x < width; x++) {
@@ -866,7 +887,7 @@ TxtrCacheEntry * CTextureManager::GetTexture(TxtrInfo * pgti, bool fromTMEM, boo
                                 int id = lumina_upscale_async(rgb_input.data(), width, height);
                                 if (id > 0) {
                                     g_pending_upscales[pEntry] = id;
-                                    // printf("LUMINA: Submitted async %d (%dx%d)\n", id, width, height);
+                                    printf("LUMINA: Submitted async %d (%dx%d)\n", id, width, height); fflush(stdout);
                                 }
                             }
                             
